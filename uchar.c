@@ -178,6 +178,9 @@ single_char:
 
 int u_char_width(uchar u)
 {
+	if (unlikely(!using_utf8))
+		goto narrow;
+
 	if (unlikely(u < 0x20))
 		goto control;
 
@@ -319,7 +322,7 @@ void u_prev_char_pos(const char *str, int *idx)
 	ch = s[--i];
 	len = len_tab[ch];
 	if (len != 0) {
-		/* start of byte sequence or invelid uchar */
+		/* start of byte sequence or invalid uchar */
 		goto one;
 	}
 
@@ -428,7 +431,7 @@ void u_set_char_raw(char *str, int *idx, uchar uch)
  * Printing functions, these lose information
  */
 
-void u_set_char(char *str, int *idx, uchar uch)
+void u_set_char(char *str, size_t *idx, uchar uch)
 {
 	int i = *idx;
 
@@ -476,10 +479,11 @@ invalid:
 	}
 }
 
-int u_copy_chars(char *dst, const char *src, int *width)
+size_t u_copy_chars(char *dst, const char *src, int *width)
 {
 	int w = *width;
-	int si = 0, di = 0;
+	int si = 0;
+	size_t di = 0;
 	int cw;
 	uchar u;
 
@@ -506,7 +510,7 @@ int u_copy_chars(char *dst, const char *src, int *width)
 		}
 		u_set_char(dst, &di, u);
 	}
-	*width -= w;
+	*width = w;
 	return di;
 }
 
@@ -522,7 +526,8 @@ int u_to_ascii(char *dst, const char *src, int len)
 
 void u_to_utf8(char *dst, const char *src)
 {
-	int s = 0, d = 0;
+	int s = 0;
+	size_t d = 0;
 	uchar u;
 	do {
 		u = u_get_char(src, &s);
@@ -530,17 +535,45 @@ void u_to_utf8(char *dst, const char *src)
 	} while (u!=0);
 }
 
-int u_skip_chars(const char *str, int *width)
+int u_print_size(uchar uch)
+{
+	int s = u_char_size(uch);
+	/* control characters and invalid unicode set as <XX> */
+	if (uch < 0x0000001fU && uch != 0){
+		return 4;
+	}
+	return s;
+}
+
+int u_str_print_size(const char *str)
+{
+	int l = 0;
+	int idx = 0;
+	uchar u;
+	do {
+		u = u_get_char(str, &idx);
+		l += u_print_size(u);
+	} while (u!=0);
+	return l;
+}
+
+int u_skip_chars(const char *str, int *width, bool overskip)
 {
 	int w = *width;
-	int idx = 0;
+	int last_idx = 0, idx = 0;
+	uchar u = 0;
 
 	while (w > 0) {
-		uchar u = u_get_char(str, &idx);
+		last_idx = idx;
+		u = u_get_char(str, &idx);
 		w -= u_char_width(u);
 	}
-	/* add 1..3 if skipped 'too much' (the last char was double width or invalid (<xx>)) */
-	*width -= w;
+	/* undo last get if skipped 'too much' (the last char was double width or invalid (<xx>)) */
+	if (w < 0 && !overskip) {
+		w += u_char_width(u);
+		idx = last_idx;
+	}
+	*width = w;
 	return idx;
 }
 
@@ -550,14 +583,14 @@ int u_skip_chars(const char *str, int *width)
 
 static inline uchar u_casefold_char(uchar ch)
 {
-        /* faster lookup for for A-Z, rest of ASCII unaffected */
-        if (ch < 0x0041)
-                return ch;
-        if (ch <= 0x005A)
-                return ch + 0x20;
+	/* faster lookup for for A-Z, rest of ASCII unaffected */
+	if (ch < 0x0041)
+		return ch;
+	if (ch <= 0x005A)
+		return ch + 0x20;
 #if defined(_WIN32) || defined(__STDC_ISO_10646__) || defined(__APPLE__)
-        if (ch < 128)
-                return ch;
+	if (ch < 128)
+		return ch;
 	ch = towlower(ch);
 #endif
 	return ch;

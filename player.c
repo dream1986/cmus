@@ -29,6 +29,7 @@
 #include "options.h"
 #include "mpris.h"
 #include "cmus.h"
+#include "lib.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,6 +78,9 @@ static struct player_info player_info_priv = {
 
 /* continue playing after track is finished? */
 int player_cont = 1;
+
+/* continue playing after album is finished? */
+int player_cont_album = 1;
 
 /* repeat current track forever? */
 int player_repeat_current;
@@ -351,7 +355,9 @@ static void update_rg_scale(void)
 	if (!player_info_priv.ti || !replaygain)
 		return;
 
-	if (replaygain == RG_TRACK || replaygain == RG_TRACK_PREFERRED) {
+	bool avoid_album_gain = replaygain == RG_SMART && (!play_library || shuffle || cmus_queue_active());
+	
+	if (replaygain == RG_TRACK || replaygain == RG_TRACK_PREFERRED || avoid_album_gain) {
 		gain = player_info_priv.ti->rg_track_gain;
 		peak = player_info_priv.ti->rg_track_peak;
 	} else {
@@ -360,7 +366,7 @@ static void update_rg_scale(void)
 	}
 
 	if (isnan(gain)) {
-		if (replaygain == RG_TRACK_PREFERRED) {
+		if (replaygain == RG_TRACK_PREFERRED || avoid_album_gain) {
 			gain = player_info_priv.ti->rg_album_gain;
 			peak = player_info_priv.ti->rg_album_peak;
 		} else if (replaygain == RG_ALBUM_PREFERRED) {
@@ -823,7 +829,7 @@ static void _consumer_handle_eof(void)
 		ip = ip_new(ti->filename);
 		_producer_status_update(PS_STOPPED);
 		/* PS_STOPPED, CS_PLAYING */
-		if (player_cont) {
+		if (player_cont && (player_cont_album == 1 || strcmp(player_info_priv.ti->album,ti->album) == 0)) {
 			_producer_play();
 			if (producer_status == PS_UNLOADED) {
 				_consumer_stop();

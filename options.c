@@ -84,6 +84,9 @@ int mouse = 0;
 int mpris = 1;
 int time_show_leading_zero = 1;
 int start_view = TREE_VIEW;
+int stop_after_queue = 0;
+int tree_width_percent = 33;
+int tree_width_max = 0;
 
 int colors[NR_COLORS] = {
 	-1,
@@ -144,6 +147,8 @@ char *track_win_alt_format = NULL;
 char *list_win_format = NULL;
 char *list_win_format_va = NULL;
 char *list_win_alt_format = NULL;
+char *clipped_text_format = NULL;
+char *clipped_text_internal = NULL;
 char *current_format = NULL;
 char *current_alt_format = NULL;
 char *statusline_format = NULL;
@@ -204,6 +209,7 @@ static int parse_bool(const char *buf, int *val)
 
 /* this is used as id in struct cmus_opt */
 enum format_id {
+	FMT_CLIPPED_TEXT,
 	FMT_CURRENT,
 	FMT_CURRENT_ALT,
 	FMT_STATUSLINE,
@@ -228,8 +234,9 @@ static const struct {
 	const char *name;
 	const char *value;
 } str_defaults[] = {
+	[FMT_CLIPPED_TEXT]	= { "format_clipped_text"	, "…"							},
 	[FMT_CURRENT_ALT]	= { "altformat_current"		, " %F "						},
-	[FMT_CURRENT]		= { "format_current"		, " %a - %l -%3n. %t%= %y "				},
+	[FMT_CURRENT]		= { "format_current"		, " %a - %l%! - %n. %t%= %y "				},
 	[FMT_STATUSLINE]	= { "format_statusline"		,
 		" %{status} %{?show_playback_position?%{position} %{?duration?/ %{duration} }?%{?duration?%{duration} }}"
 		"- %{total} %{?bpm>0?at %{bpm} BPM }"
@@ -469,6 +476,34 @@ static void set_status_display_program(void *data, const char *buf)
 		status_display_program = expand_filename(buf);
 }
 
+static void get_tree_width_percent(void *data, char *buf, size_t size)
+{
+	buf_int(buf, tree_width_percent, size);
+}
+
+static void set_tree_width_percent(void *data, const char *buf)
+{
+	int percent;
+
+	if (parse_int(buf, 1, 100, &percent))
+		tree_width_percent = percent;
+	update_size();
+}
+
+static void get_tree_width_max(void *data, char *buf, size_t size)
+{
+	buf_int(buf, tree_width_max, size);
+}
+
+static void set_tree_width_max(void *data, const char *buf)
+{
+	int cols;
+
+	if (parse_int(buf, 0, 9999, &cols))
+		tree_width_max = cols;
+	update_size();
+}
+
 /* }}} */
 
 /* callbacks for toggle options {{{ */
@@ -521,6 +556,24 @@ static void set_continue(void *data, const char *buf)
 static void toggle_continue(void *data)
 {
 	player_cont ^= 1;
+	update_statusline();
+}
+
+static void get_continue_album(void *data, char *buf, size_t size)
+{
+	strscpy(buf, bool_names[player_cont_album], size);
+}
+
+static void set_continue_album(void *data, const char *buf)
+{
+	if (!parse_bool(buf, &player_cont_album))
+		return;
+	update_statusline();
+}
+
+static void toggle_continue_album(void *data)
+{
+	player_cont_album ^= 1;
 	update_statusline();
 }
 
@@ -702,8 +755,10 @@ static void toggle_repeat(void *data)
 }
 
 static const char * const replaygain_names[] = {
-	"disabled", "track", "album", "track-preferred", "album-preferred", NULL
+	"disabled", "track", "album", "track-preferred", "album-preferred", "smart", NULL
 };
+
+static const size_t replaygain_names_len = sizeof(replaygain_names) / sizeof(replaygain_names[0]) - 1;
 
 static void get_replaygain(void *data, char *buf, size_t size)
 {
@@ -714,14 +769,14 @@ static void set_replaygain(void *data, const char *buf)
 {
 	int tmp;
 
-	if (!parse_enum(buf, 0, 4, replaygain_names, &tmp))
+	if (!parse_enum(buf, 0, replaygain_names_len - 1, replaygain_names, &tmp))
 		return;
 	player_set_rg(tmp);
 }
 
 static void toggle_replaygain(void *data)
 {
-	player_set_rg((replaygain + 1) % 5);
+	player_set_rg((replaygain + 1) % replaygain_names_len);
 }
 
 static void get_replaygain_limit(void *data, char *buf, size_t size)
@@ -1129,6 +1184,21 @@ static void set_lib_add_filter(void *data, const char *buf)
 	lib_set_add_filter(expr);
 }
 
+static void get_stop_after_queue(void *data, char *buf, size_t size)
+{
+	strscpy(buf, bool_names[stop_after_queue], size);
+}
+
+static void set_stop_after_queue(void *data, const char *buf)
+{
+	parse_bool(buf, &stop_after_queue);
+}
+
+static void toggle_stop_after_queue(void *data)
+{
+	stop_after_queue ^= 1;
+}
+
 /* }}} */
 
 /* special callbacks (id set) {{{ */
@@ -1252,6 +1322,8 @@ static void set_attr(void *data, const char *buf)
 static char **id_to_fmt(enum format_id id)
 {
 	switch (id) {
+	case FMT_CLIPPED_TEXT:
+		return &clipped_text_format;
 	case FMT_CURRENT_ALT:
 		return &current_alt_format;
 	case FMT_PLAYLIST_ALT:
@@ -1307,6 +1379,14 @@ static void set_format(void *data, const char *buf)
 	update_full();
 }
 
+static void set_clipped_text_format(void *data, const char *buf)
+{
+	free(clipped_text_format);
+	clipped_text_format = clipped_text_internal = xstrdup(buf);
+
+	update_full();
+}
+
 /* }}} */
 
 #define DN(name) { #name, get_ ## name, set_ ## name, NULL, 0 },
@@ -1328,6 +1408,7 @@ static const struct {
 	DN(rewind_offset)
 	DT(confirm_run)
 	DT(continue)
+	DT(continue_album)
 	DT(smart_artist_sort)
 	DN(id3_default_charset)
 	DN(icecast_default_charset)
@@ -1365,6 +1446,9 @@ static const struct {
 	DT(time_show_leading_zero)
 	DN(lib_add_filter)
 	DN(start_view)
+	DT(stop_after_queue)
+	DN(tree_width_percent)
+	DN(tree_width_max)
 	{ NULL, NULL, NULL, NULL, 0 }
 };
 
@@ -1480,6 +1564,8 @@ void options_add(void)
 		option_add(str_defaults[i].name, id_to_fmt(i), get_format,
 				set_format, NULL, 0);
 
+	option_find("format_clipped_text")->set = set_clipped_text_format;
+
 	for (i = 0; i < NR_COLORS; i++)
 		option_add(color_names[i], &colors[i], get_color, set_color,
 				NULL, 0);
@@ -1533,6 +1619,11 @@ void options_load(void)
 	if (source_file(filename) == -1) {
 		if (errno != ENOENT)
 			error_msg("loading %s: %s", filename, strerror(errno));
+	}
+
+	/* replace the default format_clipped_text symbol in ascii terminal */
+	if (!using_utf8 && strcmp(clipped_text_format, str_defaults[FMT_CLIPPED_TEXT].value) == 0) {
+		clipped_text_internal = xstrdup("...");
 	}
 }
 

@@ -148,6 +148,9 @@ extern int mouse;
 extern int mpris;
 extern int time_show_leading_zero;
 extern int start_view;
+extern int stop_after_queue;
+extern int tree_width_percent;
+extern int tree_width_max;
 
 extern const char * const aaa_mode_names[];
 extern const char * const view_names[NR_VIEWS + 1];
@@ -180,6 +183,10 @@ extern char *statusline_format;
 /* format string for window title */
 extern char *window_title_format;
 extern char *window_title_alt_format;
+
+/* format string used to terminate all clipped text */
+extern char *clipped_text_format;
+extern char *clipped_text_internal;
 
 extern char *id3_default_charset;
 extern char *icecast_default_charset;

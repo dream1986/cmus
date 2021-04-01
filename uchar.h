@@ -20,6 +20,7 @@
 #define CMUS_UCHAR_H
 
 #include <stddef.h> /* size_t */
+#include <stdbool.h>
 
 typedef unsigned int uchar;
 
@@ -105,6 +106,20 @@ size_t u_strlen_safe(const char *str);
 int u_str_width(const char *str);
 
 /*
+ * @uch  unicode character
+ *
+ * Retuns size of @uch if it were printed.
+ */
+int u_print_size(uchar uch);
+
+/*
+ * @str  null-terminated UTF-8 string
+ *
+ * Retuns size of @str if it were printed.
+ */
+int u_str_print_size(const char *str);
+
+/*
  * @str  null-terminated UTF-8 string
  * @len  number of characters to measure
  *
@@ -137,20 +152,20 @@ uchar u_get_char(const char *str, int *idx);
  * @uch  unicode character
  */
 void u_set_char_raw(char *str, int *idx, uchar uch);
-void u_set_char(char *str, int *idx, uchar uch);
+void u_set_char(char *str, size_t *idx, uchar uch);
 
 /*
  * @dst    destination buffer
  * @src    null-terminated UTF-8 string
- * @width  how much to copy
+ * @width  how much to copy (at most)
  *
- * Copies at most @count characters, less if null byte was hit.
+ * Copies at most @width columns, less if null byte was hit.
  * Null byte is _never_ copied.
- * Actual width of copied characters is stored to @width.
+ * Remaining width is stored to @width.
  *
  * Returns number of _bytes_ copied.
  */
-int u_copy_chars(char *dst, const char *src, int *width);
+size_t u_copy_chars(char *dst, const char *src, int *width);
 
 /*
  * @dst    destination buffer
@@ -178,15 +193,14 @@ void u_to_utf8(char *dst, const char *src);
 /*
  * @str    null-terminated UTF-8 string, must be long enough
  * @width  how much to skip
+ * @overskip skip a final wide character even when it overshoots @width
  *
- * Skips @count UTF-8 characters.
- * Total width of skipped characters is stored to @width.
- * Returned @width can be the given @width + 1 if the last skipped
- * character was double width.
+ * Skips @width columns in a UTF-8 string.
+ * Underskip (positive) or overskip (negative) is stored to @width.
  *
  * Returns number of _bytes_ skipped.
  */
-int u_skip_chars(const char *str, int *width);
+int u_skip_chars(const char *str, int *width, bool overskip);
 
 /*
  * @str  valid null-terminated UTF-8 string

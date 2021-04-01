@@ -46,7 +46,7 @@ struct playlist {
 
 static struct playlist *pl_visible; /* never NULL */
 static struct playlist *pl_marked; /* never NULL */
-static struct window *pl_list_win;
+struct window *pl_list_win;
 
 /* pl_playing_track shares its track_info reference with the playlist it's in.
  * pl_playing_track and pl_playing might be null but pl_playing_track != NULL
@@ -56,7 +56,7 @@ static struct simple_track *pl_playing_track;
 static struct playlist *pl_playing;
 
 static int pl_cursor_in_track_window;
-static struct editable_shared pl_editable_shared;
+struct editable_shared pl_editable_shared;
 static LIST_HEAD(pl_head); /* never empty */
 
 static struct searchable *pl_searchable;
@@ -314,10 +314,15 @@ static struct simple_track *pl_get_first_track(struct playlist *pl)
 {
 	/* pl is not empty */
 
-	return to_simple_track(pl->editable.head.next);
+	if (shuffle) {
+		struct shuffle_track *st = shuffle_list_get_next(&pl->shuffle_root, NULL, pl_dummy_filter);
+		return &st->simple_track;
+	} else {
+		return to_simple_track(pl->editable.head.next);
+	}
 }
 
-static struct track_info *pl_play_track(struct playlist *pl, struct simple_track *t)
+static struct track_info *pl_play_track(struct playlist *pl, struct simple_track *t, bool force_follow)
 {
 	/* t is a track in pl */
 
@@ -328,7 +333,7 @@ static struct track_info *pl_play_track(struct playlist *pl, struct simple_track
 	pl_playing = pl;
 	pl_editable_shared.win->changed = 1;
 
-	if (follow)
+	if (force_follow || follow)
 		pl_select_playing_track();
 
 	/* reference owned by the caller */
@@ -342,7 +347,7 @@ static struct track_info *pl_play_selected_track(void)
 	if (pl_empty(pl_visible))
 		return NULL;
 
-	return pl_play_track(pl_visible, pl_get_selected_track());
+	return pl_play_track(pl_visible, pl_get_selected_track(), false);
 }
 
 static struct track_info *pl_play_first_in_pl_playing(void)
@@ -355,7 +360,7 @@ static struct track_info *pl_play_first_in_pl_playing(void)
 		return NULL;
 	}
 
-	return pl_play_track(pl_playing, pl_get_first_track(pl_playing));
+	return pl_play_track(pl_playing, pl_get_first_track(pl_playing), false);
 }
 
 static struct simple_track *pl_get_next(struct playlist *pl, struct simple_track *cur)
@@ -485,7 +490,7 @@ static struct track_info *pl_goto_generic(pl_shuffled_move shuffled,
 		track = normal(pl_playing, pl_playing_track);
 
 	if (track)
-		return pl_play_track(pl_playing, track);
+		return pl_play_track(pl_playing, track, false);
 	return NULL;
 }
 
@@ -641,13 +646,22 @@ struct track_info *pl_play_selected_row(void)
 	 */
 
 	int was_in_track_window = pl_cursor_in_track_window;
-	if (!pl_cursor_in_track_window)
-		window_goto_top(pl_editable_shared.win);
 
 	struct playlist *prev_pl = pl_playing;
 	struct simple_track *prev_track = pl_playing_track;
 
-	struct track_info *rv = pl_play_selected_track();
+	struct track_info *rv = NULL;
+
+	if (!pl_cursor_in_track_window) {
+		if (shuffle && !pl_empty(pl_visible)) {
+			struct shuffle_track *st = shuffle_list_get_next(&pl_visible->shuffle_root, NULL, pl_dummy_filter);
+			struct simple_track *track = &st->simple_track;
+			rv = pl_play_track(pl_visible, track, true);
+		}
+	}
+
+	if (!rv)
+		rv = pl_play_selected_track();
 
 	if (shuffle && rv && (pl_playing == prev_pl) && prev_track) {
 		struct shuffle_track *prev_st = simple_track_to_shuffle_track(prev_track);
@@ -764,10 +778,10 @@ int _pl_for_each_sel(track_info_cb cb, void *data, int reverse)
 		return editable_for_each(&pl_visible->editable, cb, data, reverse);
 }
 
-int pl_for_each_sel(track_info_cb cb, void *data, int reverse)
+int pl_for_each_sel(track_info_cb cb, void *data, int reverse, int advance)
 {
 	if (pl_cursor_in_track_window)
-		return editable_for_each_sel(&pl_visible->editable, cb, data, reverse);
+		return editable_for_each_sel(&pl_visible->editable, cb, data, reverse, advance);
 	else
 		return editable_for_each(&pl_visible->editable, cb, data, reverse);
 }
